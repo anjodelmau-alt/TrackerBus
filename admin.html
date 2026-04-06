@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BusTrack — Painel Admin</title>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0e1a; --surface: #111827; --card: #1a2332; --border: #2d3f55;
+      --accent: #3b82f6; --success: #10b981; --warning: #f59e0b;
+      --danger: #ef4444; --text: #e2e8f0; --muted: #64748b;
+      --radius: 12px;
+    }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex; align-items: center; justify-content: space-between;
+      position: sticky; top: 0; z-index: 100;
+    }
+    header h1 { font-size: 1.3rem; font-weight: 800; }
+    header h1 span { color: var(--accent); }
+    .header-meta { display: flex; align-items: center; gap: 12px; font-size: .85rem; color: var(--muted); }
+    .header-meta a { color: var(--danger); text-decoration: none; font-weight: 600; }
+
+    /* ── Layout ── */
+    main { max-width: 1100px; margin: 0 auto; padding: 28px 20px; display: flex; flex-direction: column; gap: 24px; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 22px;
+    }
+    .card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    .card-title { font-size: 1rem; font-weight: 700; }
+    .card-sub   { font-size: .8rem; color: var(--muted); }
+
+    /* ── Botões ── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 9px 18px; border: none; border-radius: 8px;
+      font-size: .85rem; font-weight: 600; cursor: pointer;
+      transition: filter .15s;
+    }
+    .btn:hover { filter: brightness(1.12); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-sm { padding: 6px 12px; font-size: .8rem; }
+    .btn-primary { background: var(--accent);  color: #fff; }
+    .btn-danger  { background: var(--danger);  color: #fff; }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-warning { background: var(--warning); color: #000; }
+    .btn-ghost   { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+
+    /* ── Inputs ── */
+    input[type=text], textarea, select {
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 14px; font-size: .9rem; font-family: inherit;
+      outline: none; width: 100%;
+    }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+    textarea { resize: vertical; min-height: 80px; }
+    .input-row { display: flex; gap: 10px; }
+    .input-row input { flex: 1; }
+
+    /* ── Stats ── */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+    .stat-box {
+      background: var(--bg); border-radius: 10px; padding: 16px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .stat-box label { font-size: .72rem; text-transform: uppercase; color: var(--muted); letter-spacing: .05em; }
+    .stat-box span  { font-size: 1.8rem; font-weight: 800; }
+
+    /* ── Sessões / tabela ── */
+    .session-block {
+      border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden; margin-bottom: 12px;
+    }
+    .session-header {
+      background: var(--surface); padding: 12px 16px;
+      display: flex; align-items: center; justify-content: space-between;
+      cursor: pointer;
+    }
+    .session-header h3 { font-size: .95rem; font-weight: 700; }
+    .session-header .meta { display: flex; gap: 8px; align-items: center; }
+    .session-body { padding: 12px 16px; }
+
+    table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+    th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+    td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.04); vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    .mono { font-family: monospace; font-size: .8rem; }
+
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot-green  { background: var(--success); }
+    .dot-grey   { background: var(--muted); }
+    .dot-red    { background: var(--danger); }
+
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 10px; border-radius: 99px; font-size: .75rem; font-weight: 600;
+    }
+    .badge-blue   { background: rgba(59,130,246,.18);  color: #93c5fd; }
+    .badge-green  { background: rgba(16,185,129,.18);  color: #6ee7b7; }
+    .badge-red    { background: rgba(239,68,68,.18);   color: #fca5a5; }
+    .badge-yellow { background: rgba(245,158,11,.18);  color: #fcd34d; }
+
+    /* ── Notificar ── */
+    .notify-form { display: flex; flex-direction: column; gap: 12px; }
+    .notify-form .row { display: flex; gap: 10px; align-items: flex-end; }
+    .notify-form .row > * { flex: 1; }
+    .notify-form .row button { flex: 0 0 auto; }
+
+    /* ── Log ── */
+    #admin-log {
+      background: #060a12; border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px; font-family: monospace; font-size: .8rem;
+      max-height: 200px; overflow-y: auto; color: #94a3b8;
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .log-entry { display: flex; gap: 8px; }
+    .log-ts    { color: var(--muted); flex-shrink: 0; }
+    .log-info  { color: #93c5fd; }
+    .log-warn  { color: #fcd34d; }
+    .log-err   { color: #fca5a5; }
+    .log-ok    { color: #6ee7b7; }
+
+    /* ── Modal de confirmação ── */
+    #modal-overlay {
+      position: fixed; inset: 0; z-index: 9000;
+      background: rgba(0,0,0,.7);
+      display: flex; align-items: center; justify-content: center;
+    }
+    #modal-overlay.hidden { display: none; }
+    .modal {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 28px; max-width: 400px; width: 90%;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .modal h3 { font-size: 1.1rem; font-weight: 700; }
+    .modal p  { color: var(--muted); line-height: 1.6; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+    @media (max-width: 600px) {
+      .notify-form .row { flex-direction: column; }
+      .input-row { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Bus<span>Track</span> <small style="font-size:.7em;color:var(--muted);font-weight:400">Admin</small></h1>
+  <div class="header-meta">
+    <span id="last-refresh">—</span>
+    <button class="btn btn-ghost btn-sm" onclick="loadSessions()">↻ Atualizar</button>
+    <a href="/admin/logout">Sair</a>
+  </div>
+</header>
+
+<main>
+
+  <!-- ── Stats ────────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">Visão Geral</div>
+        <div class="card-sub">Atualizado em tempo real via Firebase</div>
+      </div>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-box">
+        <label>Sessões Ativas</label>
+        <span id="stat-sessions" style="color:var(--accent)">—</span>
+      </div>
+      <div class="stat-box">
+        <label>Rastreadores On</label>
+        <span id="stat-trackers" style="color:var(--success)">—</span>
+      </div>
+      <div class="stat-box">
+        <label>Total Usuários</label>
+        <span id="stat-users" style="color:var(--text)">—</span>
+      </div>
+      <div class="stat-box">
+        <label>Banidos</label>
+        <span id="stat-banned" style="color:var(--danger)">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Notificar ─────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header"><div class="card-title">📢 Enviar Notificação</div></div>
+    <div class="notify-form">
+      <div class="row">
+        <div>
+          <label style="font-size:.8rem;color:var(--muted);display:block;margin-bottom:6px">Destino</label>
+          <select id="notify-target">
+            <option value="">Todos os ônibus</option>
+          </select>
+        </div>
+      </div>
+      <textarea id="notify-msg" placeholder="Digite a mensagem que aparecerá na tela de todos os passageiros…"></textarea>
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-warning" onclick="sendNotification()">📨 Enviar para todos</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Banimento manual ───────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header"><div class="card-title">🚫 Banimento Manual</div></div>
+    <div class="input-row">
+      <input type="text" id="ban-input" placeholder="userId ou token (ex: u_abc123…)" />
+      <button class="btn btn-danger" onclick="confirmBan()">Banir</button>
+      <button class="btn btn-success" onclick="confirmUnban()">Desbanir</button>
+    </div>
+  </div>
+
+  <!-- ── Sessões ────────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">🚌 Sessões e Usuários</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadSessions()">↻</button>
+    </div>
+    <div id="sessions-container">
+      <div style="color:var(--muted);font-size:.9rem;text-align:center;padding:32px">
+        Carregando sessões…
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Log de ações ──────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">📋 Log de Ações</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('admin-log').innerHTML=''">Limpar</button>
+    </div>
+    <div id="admin-log"><div class="log-entry"><span class="log-ts">—</span><span class="log-info">Painel inicializado.</span></div></div>
+  </div>
+
+</main>
+
+<!-- Modal de confirmação -->
+<div id="modal-overlay" class="hidden">
+  <div class="modal">
+    <h3 id="modal-title">Confirmar ação</h3>
+    <p id="modal-body">Tem certeza?</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-danger" id="modal-confirm-btn">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── Firebase config (mesma do index.html) ─────────────────────────── */
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyDRXQG7YinISft96qOKxa_Qm_bTCk71W_A",
+  authDomain:        "bustracker-salvador01.firebaseapp.com",
+  databaseURL:       "https://bustracker-salvador01-default-rtdb.firebaseio.com",
+  projectId:         "bustracker-salvador01",
+  storageBucket:     "bustracker-salvador01.firebasestorage.app",
+  messagingSenderId: "273510732166",
+  appId:             "1:273510732166:web:2f37003eabf1fc99ff1c07"
+};
+
+const app = firebase.initializeApp(FIREBASE_CONFIG);
+const db  = firebase.database();
+
+/* ── Log helper ────────────────────────────────────────────────────── */
+function log(msg, type = "info") {
+  const el = document.getElementById("admin-log");
+  const ts = new Date().toLocaleTimeString("pt-BR");
+  const div = document.createElement("div");
+  div.className = "log-entry";
+  div.innerHTML = `<span class="log-ts">${ts}</span><span class="log-${type}">${msg}</span>`;
+  el.prepend(div);
+  if (el.children.length > 100) el.lastChild.remove();
+}
+
+/* ── Carregar sessões via API ───────────────────────────────────────── */
+async function loadSessions() {
+  try {
+    const res  = await fetch("/api/admin/sessions");
+    const data = await res.json();
+    renderSessions(data);
+    updateStats(data);
+    updateNotifyTargets(data);
+    document.getElementById("last-refresh").textContent =
+      "Atualizado: " + new Date().toLocaleTimeString("pt-BR");
+    log(`${data.length} sessão(ões) carregada(s).`, "ok");
+  } catch(e) {
+    log("Erro ao carregar sessões: " + e.message, "err");
+  }
+}
+
+function updateStats(sessions) {
+  let trackers = 0, users = 0;
+  sessions.forEach(s => {
+    if (s.trackerActive) trackers++;
+    users += s.userCount;
+  });
+
+  document.getElementById("stat-sessions").textContent = sessions.length;
+  document.getElementById("stat-trackers").textContent = trackers;
+  document.getElementById("stat-users").textContent    = users;
+
+  // Banidos vem do Firebase direto
+  db.ref("/banned").get().then(snap => {
+    const b = snap.val() || {};
+    document.getElementById("stat-banned").textContent = Object.keys(b).length;
+  });
+}
+
+function updateNotifyTargets(sessions) {
+  const sel = document.getElementById("notify-target");
+  // Mantém "todos"
+  while (sel.options.length > 1) sel.remove(1);
+  sessions.forEach(s => {
+    const opt = document.createElement("option");
+    opt.value = s.token;
+    opt.textContent = `🚌 ${s.token} (${s.userCount} usuários)`;
+    sel.appendChild(opt);
+  });
+}
+
+/* ── Renderizar sessões ─────────────────────────────────────────────── */
+function renderSessions(sessions) {
+  const container = document.getElementById("sessions-container");
+
+  if (!sessions.length) {
+    container.innerHTML = `<div style="color:var(--muted);text-align:center;padding:32px">Nenhuma sessão ativa.</div>`;
+    return;
+  }
+
+  container.innerHTML = sessions.map(s => {
+    const trackerBadge = s.trackerActive
+      ? `<span class="badge badge-green">🛰 Rastreador On</span>`
+      : `<span class="badge badge-yellow">⚠ Sem rastreador</span>`;
+
+    const rows = (s.users || []).map(u => {
+      const age  = Date.now() - (u.lastSeen || 0);
+      const online = age < 30000;
+      const dotCls = u.banned ? "dot-red" : online ? "dot-green" : "dot-grey";
+      const roleTag = u.role === "tracker"
+        ? `<span class="badge badge-green">🛰 Rastreador</span>`
+        : `<span class="badge badge-blue">🪑 Passageiro</span>`;
+      const bannedTag = u.banned
+        ? `<span class="badge badge-red">BANIDO</span>` : "";
+
+      return `
+        <tr>
+          <td><span class="dot ${dotCls}"></span></td>
+          <td class="mono">${u.id}</td>
+          <td>${roleTag}</td>
+          <td style="color:var(--muted);font-size:.75rem">${u.stopId || "—"}</td>
+          <td>${bannedTag}</td>
+          <td>
+            ${u.banned
+              ? `<button class="btn btn-success btn-sm" onclick="apiUnban('${u.id}')">✔ Desbanir</button>`
+              : `<button class="btn btn-danger  btn-sm" onclick="apiConfirmBan('${u.id}')">🚫 Banir</button>`
+            }
+          </td>
+        </tr>`;
+    }).join("");
+
+    return `
+      <div class="session-block">
+        <div class="session-header" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+          <h3>🔑 ${s.token}</h3>
+          <div class="meta">
+            ${trackerBadge}
+            <span class="badge badge-blue">${s.userCount} usuário(s)</span>
+            <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();confirmClearSession('${s.token}')">
+              ⏹ Encerrar
+            </button>
+          </div>
+        </div>
+        <div class="session-body">
+          ${rows ? `
+          <table>
+            <thead><tr>
+              <th></th><th>ID</th><th>Papel</th><th>Ponto</th><th>Status</th><th>Ação</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>` : `<p style="color:var(--muted);font-size:.85rem">Nenhum usuário.</p>`}
+        </div>
+      </div>`;
+  }).join("");
+}
+
+/* ── Notificação ────────────────────────────────────────────────────── */
+async function sendNotification() {
+  const msg    = document.getElementById("notify-msg").value.trim();
+  const target = document.getElementById("notify-target").value;
+
+  if (!msg) { alert("Digite uma mensagem."); return; }
+
+  try {
+    const body = { message: msg };
+    if (target) body.token = target;
+    const res  = await fetch("/api/admin/notify", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (data.ok) {
+      log(`Notificação enviada: "${msg}" → ${target || "todos"}`, "ok");
+      document.getElementById("notify-msg").value = "";
+    } else {
+      log("Erro ao notificar: " + (data.error || "?"), "err");
+    }
+  } catch(e) {
+    log("Erro de conexão: " + e.message, "err");
+  }
+}
+
+/* ── Banimento ──────────────────────────────────────────────────────── */
+function confirmBan() {
+  const target = document.getElementById("ban-input").value.trim();
+  if (!target) { alert("Insira um userId ou token."); return; }
+  apiConfirmBan(target);
+}
+
+function apiConfirmBan(target) {
+  showModal(
+    `Banir "${target}"?`,
+    "O usuário perderá acesso imediatamente e não poderá reconectar.",
+    async () => {
+      await apiBan(target);
+      loadSessions();
+    }
+  );
+}
+
+async function apiBan(target) {
+  try {
+    const res  = await fetch("/api/admin/ban", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target })
+    });
+    const data = await res.json();
+    if (data.ok) log(`Banido: ${target}`, "warn");
+    else         log("Erro ao banir: " + data.error, "err");
+  } catch(e) { log("Erro: " + e.message, "err"); }
+}
+
+function confirmUnban() {
+  const target = document.getElementById("ban-input").value.trim();
+  if (!target) { alert("Insira um userId ou token."); return; }
+  apiUnban(target);
+}
+
+async function apiUnban(target) {
+  try {
+    const res  = await fetch("/api/admin/unban", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target })
+    });
+    const data = await res.json();
+    if (data.ok) { log(`Desbanido: ${target}`, "ok"); loadSessions(); }
+    else         log("Erro ao desbanir: " + data.error, "err");
+  } catch(e) { log("Erro: " + e.message, "err"); }
+}
+
+/* ── Encerrar sessão ────────────────────────────────────────────────── */
+function confirmClearSession(token) {
+  showModal(
+    `Encerrar sessão "${token}"?`,
+    "O rastreio será interrompido para todos os passageiros desta linha.",
+    async () => {
+      const res  = await fetch("/api/admin/clear-session", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token })
+      });
+      const data = await res.json();
+      if (data.ok) { log(`Sessão ${token} encerrada.`, "ok"); loadSessions(); }
+      else         log("Erro: " + data.error, "err");
+    }
+  );
+}
+
+/* ── Modal ──────────────────────────────────────────────────────────── */
+function showModal(title, body, onConfirm) {
+  document.getElementById("modal-title").textContent = title;
+  document.getElementById("modal-body").textContent  = body;
+  document.getElementById("modal-overlay").classList.remove("hidden");
+  const btn = document.getElementById("modal-confirm-btn");
+  btn.onclick = () => { closeModal(); onConfirm(); };
+}
+function closeModal() {
+  document.getElementById("modal-overlay").classList.add("hidden");
+}
+
+/* ── Init ───────────────────────────────────────────────────────────── */
+loadSessions();
+setInterval(loadSessions, 30000);   // atualiza a cada 30s
+</script>
+</body>
+</html>

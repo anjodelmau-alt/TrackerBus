@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BusTrack — Login Admin</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0e1a; --card: #1a2332; --border: #2d3f55;
+      --accent: #3b82f6; --danger: #ef4444; --text: #e2e8f0; --muted: #64748b;
+    }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    }
+    .login-box {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 16px; padding: 40px 36px;
+      width: 100%; max-width: 380px;
+      display: flex; flex-direction: column; gap: 20px;
+    }
+    h1 { font-size: 1.6rem; font-weight: 800; }
+    h1 span { color: var(--accent); }
+    p { color: var(--muted); font-size: .9rem; }
+
+    label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: 6px; }
+    input[type=password] {
+      width: 100%; padding: 12px 16px;
+      background: #0a0e1a; color: var(--text);
+      border: 1px solid var(--border); border-radius: 10px;
+      font-size: 1rem; outline: none;
+    }
+    input[type=password]:focus { border-color: var(--accent); }
+
+    .error {
+      background: rgba(239,68,68,.15); border: 1px solid rgba(239,68,68,.3);
+      border-radius: 8px; padding: 10px 14px;
+      color: #fca5a5; font-size: .875rem;
+    }
+
+    button[type=submit] {
+      width: 100%; padding: 14px; border: none; border-radius: 10px;
+      background: var(--accent); color: #fff;
+      font-size: 1rem; font-weight: 700; cursor: pointer;
+      transition: filter .15s;
+    }
+    button[type=submit]:hover { filter: brightness(1.1); }
+  </style>
+</head>
+<body>
+  <div class="login-box">
+    <div>
+      <h1>Bus<span>Track</span></h1>
+      <p>Painel de Administração — acesso restrito</p>
+    </div>
+
+    {% if error %}
+    <div class="error">⚠ {{ error }}</div>
+    {% endif %}
+
+    <form method="POST" action="/admin/login">
+      <div>
+        <label for="password">Senha</label>
+        <input type="password" id="password" name="password"
+               placeholder="••••••••••" autofocus autocomplete="current-password" />
+      </div>
+      <br>
+      <button type="submit">Entrar no Painel</button>
+    </form>
+  </div>
+</body>
+</html>
