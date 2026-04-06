@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0f172a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>BusTrack — Rastreio em Tempo Real</title>
+
+  <!-- Leaflet.js -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Firebase SDK (compat v9) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+  <style>
+    /* ─── Reset & variáveis ──────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0a0e1a;
+      --surface:   #111827;
+      --card:      #1e2a3a;
+      --border:    #2d3f55;
+      --accent:    #3b82f6;
+      --accent2:   #06b6d4;
+      --success:   #10b981;
+      --warning:   #f59e0b;
+      --danger:    #ef4444;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --radius:    14px;
+      --shadow:    0 8px 32px rgba(0,0,0,.45);
+    }
+
+    html, body {
+      height: 100%; width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      overflow: hidden;
+    }
+
+    /* ─── Telas ──────────────────────────────────────────────────────── */
+    .screen {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 24px;
+      transition: opacity .3s, transform .3s;
+    }
+    .screen.hidden { opacity: 0; pointer-events: none; transform: scale(.97); }
+
+    /* ─── Tela de validação / loading ────────────────────────────────── */
+    #screen-loading {
+      gap: 20px; text-align: center;
+    }
+    .spinner {
+      width: 56px; height: 56px;
+      border: 4px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #screen-loading h2 { font-size: 1.3rem; font-weight: 600; }
+    #screen-loading p  { color: var(--muted); font-size: .9rem; }
+
+    /* ─── Tela de erro / acesso negado ───────────────────────────────── */
+    #screen-error {
+      gap: 16px; text-align: center;
+    }
+    .error-icon { font-size: 3.5rem; }
+    #screen-error h2 { font-size: 1.4rem; font-weight: 700; color: var(--danger); }
+    #screen-error p  { color: var(--muted); max-width: 320px; line-height: 1.6; }
+
+    /* ─── Tela de seleção de papel ───────────────────────────────────── */
+    #screen-role {
+      gap: 24px; max-width: 380px; width: 100%; text-align: center;
+    }
+    .logo { font-size: 2.8rem; font-weight: 800; letter-spacing: -1px; }
+    .logo span { color: var(--accent); }
+    #screen-role p { color: var(--muted); font-size: .95rem; line-height: 1.6; }
+
+    .btn {
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      width: 100%; padding: 16px 24px;
+      border: none; border-radius: var(--radius);
+      font-size: 1rem; font-weight: 600; cursor: pointer;
+      transition: filter .15s, transform .1s;
+    }
+    .btn:active { transform: scale(.97); }
+    .btn-primary  { background: var(--accent);   color: #fff; }
+    .btn-success  { background: var(--success);  color: #fff; }
+    .btn-warning  { background: var(--warning);  color: #000; }
+    .btn-danger   { background: var(--danger);   color: #fff; }
+    .btn-ghost    { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+    .btn:hover:not(:disabled) { filter: brightness(1.1); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border-radius: 99px;
+      font-size: .8rem; font-weight: 600;
+    }
+    .badge-blue    { background: rgba(59,130,246,.2); color: #93c5fd; }
+    .badge-green   { background: rgba(16,185,129,.2); color: #6ee7b7; }
+    .badge-yellow  { background: rgba(245,158,11,.2); color: #fcd34d; }
+    .badge-red     { background: rgba(239,68,68,.2);  color: #fca5a5; }
+
+    /* ─── Layout principal (mapa + painel) ───────────────────────────── */
+    #screen-main {
+      padding: 0; flex-direction: row; align-items: stretch;
+      justify-content: flex-start;
+    }
+
+    #map-container {
+      flex: 1; position: relative;
+      background: #0d1520;
+    }
+    #map { width: 100%; height: 100%; }
+
+    /* Leaflet dark tiles override */
+    .leaflet-tile { filter: brightness(.85) saturate(.8); }
+
+    /* ─── Painel lateral ─────────────────────────────────────────────── */
+    #side-panel {
+      width: 320px; min-width: 280px;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+      transition: transform .3s;
+    }
+
+    .panel-header {
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .panel-header h1 { font-size: 1.25rem; font-weight: 700; }
+    .panel-header .meta { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .panel-body {
+      flex: 1; overflow-y: auto; padding: 16px;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .panel-body::-webkit-scrollbar { width: 4px; }
+    .panel-body::-webkit-scrollbar-track { background: transparent; }
+    .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    /* ─── Card ───────────────────────────────────────────────────────── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .card-title {
+      font-size: .8rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .06em; color: var(--muted);
+    }
+
+    /* ─── Status do rastreador ───────────────────────────────────────── */
+    .status-row {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .dot-green  { background: var(--success); box-shadow: 0 0 8px var(--success); animation: pulse 2s infinite; }
+    .dot-grey   { background: var(--muted); }
+    .dot-red    { background: var(--danger); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+    /* ─── Seleção de ponto ───────────────────────────────────────────── */
+    .stop-select {
+      width: 100%; padding: 12px;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: 10px;
+      font-size: .95rem; appearance: none;
+      cursor: pointer;
+    }
+    .stop-select:focus { outline: none; border-color: var(--accent); }
+
+    /* ─── Barra de distância ─────────────────────────────────────────── */
+    .distance-bar-wrap {
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .distance-label {
+      display: flex; justify-content: space-between;
+      font-size: .85rem; color: var(--muted);
+    }
+    .distance-label strong { color: var(--text); }
+    .distance-bar {
+      height: 8px; border-radius: 99px;
+      background: var(--border); overflow: hidden;
+    }
+    .distance-bar-fill {
+      height: 100%; border-radius: 99px;
+      background: linear-gradient(90deg, var(--success), var(--warning));
+      transition: width .5s ease;
+    }
+
+    /* ─── Alarme ─────────────────────────────────────────────────────── */
+    #alarm-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      background: rgba(239,68,68,.92);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 20px; text-align: center; padding: 32px;
+      animation: alarmPulse 1s ease-in-out infinite alternate;
+    }
+    #alarm-overlay.hidden { display: none; }
+    @keyframes alarmPulse { from{background:rgba(239,68,68,.85)} to{background:rgba(239,68,68,1)} }
+    #alarm-overlay h2 { font-size: 2rem; font-weight: 900; }
+    #alarm-overlay p  { font-size: 1.1rem; opacity: .9; max-width: 300px; }
+
+    /* ─── Notificação admin ──────────────────────────────────────────── */
+    #admin-toast {
+      position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+      z-index: 8000;
+      background: var(--warning); color: #000;
+      border-radius: var(--radius); padding: 14px 24px;
+      max-width: 90vw; text-align: center;
+      font-weight: 600; box-shadow: var(--shadow);
+      transition: opacity .4s;
+    }
+    #admin-toast.hidden { opacity: 0; pointer-events: none; }
+
+    /* ─── Botão flutuante (colapsar painel no mobile) ────────────────── */
+    #toggle-panel-btn {
+      display: none;
+      position: fixed; bottom: 24px; right: 24px; z-index: 500;
+      width: 52px; height: 52px; border-radius: 50%;
+      background: var(--accent); color: #fff; border: none;
+      font-size: 1.4rem; cursor: pointer;
+      box-shadow: var(--shadow);
+      align-items: center; justify-content: center;
+    }
+
+    /* ─── Responsivo ─────────────────────────────────────────────────── */
+    @media (max-width: 680px) {
+      #screen-main { flex-direction: column; }
+      #side-panel {
+        width: 100%; min-width: unset;
+        border-left: none; border-top: 1px solid var(--border);
+        max-height: 50vh;
+      }
+      #toggle-panel-btn { display: flex; }
+    }
+
+    /* ─── Tracker info ───────────────────────────────────────────────── */
+    .info-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    }
+    .info-cell {
+      background: var(--bg); border-radius: 10px; padding: 10px;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .info-cell label { font-size: .7rem; color: var(--muted); text-transform: uppercase; }
+    .info-cell span  { font-size: 1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- TELA: Loading                                                           -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div id="screen-loading" class="screen">
+  <div class="spinner"></div>
+  <h2>Validando acesso…</h2>
+  <p>Aguarde enquanto verificamos seu QR Code.</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- TELA: Erro                                                              -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div id="screen-error" class="screen hidden">
+  <div class="error-icon">🚫</div>
+  <h2>Acesso Negado</h2>
+  <p id="error-msg">QR Code inválido ou expirado. Por favor, escaneie o código no ônibus.</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- TELA: Seleção de papel (Rastreador ou Passageiro)                       -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div id="screen-role" class="screen hidden">
+  <div class="logo">Bus<span>Track</span></div>
+  <p>Você é o primeiro a escanear o QR Code deste ônibus. Deseja ativar o rastreio?</p>
+  <button class="btn btn-success" id="btn-start-tracker">
+    🛰️ Sou o Rastreador — Iniciar Rastreio
+  </button>
+  <button class="btn btn-ghost" id="btn-be-passenger">
+    🪑 Sou Passageiro — Ver Mapa
+  </button>
+  <p style="font-size:.8rem;color:var(--muted);margin-top:4px;">
+    O rastreador compartilha sua localização em tempo real com todos os passageiros.
+  </p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- TELA: Principal (Mapa + Painel)                                         -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div id="screen-main" class="screen hidden">
+
+  <!-- Mapa -->
+  <div id="map-container">
+    <div id="map"></div>
+  </div>
+
+  <!-- Painel lateral -->
+  <div id="side-panel">
+    <div class="panel-header">
+      <h1>🚌 BusTrack</h1>
+      <div class="meta">
+        <span class="badge badge-blue" id="badge-token">—</span>
+        <span class="badge" id="badge-role">—</span>
+      </div>
+    </div>
+
+    <div class="panel-body">
+
+      <!-- Status do rastreador -->
+      <div class="card" id="card-tracker-status">
+        <span class="card-title">Status do Rastreio</span>
+        <div class="status-row">
+          <div class="dot" id="dot-status"></div>
+          <span id="status-text">Aguardando rastreador…</span>
+        </div>
+        <div class="info-grid" id="location-info" style="display:none">
+          <div class="info-cell">
+            <label>Latitude</label>
+            <span id="info-lat">—</span>
+          </div>
+          <div class="info-cell">
+            <label>Longitude</label>
+            <span id="info-lng">—</span>
+          </div>
+          <div class="info-cell">
+            <label>Velocidade</label>
+            <span id="info-speed">— km/h</span>
+          </div>
+          <div class="info-cell">
+            <label>Atualizado</label>
+            <span id="info-time">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Painel do passageiro: seleção de ponto -->
+      <div class="card" id="card-passenger" style="display:none">
+        <span class="card-title">Meu Desembarque</span>
+        <select class="stop-select" id="stop-select">
+          <option value="">— Selecione seu ponto —</option>
+        </select>
+
+        <div class="distance-bar-wrap" id="distance-wrap" style="display:none">
+          <div class="distance-label">
+            <span>Distância até o ponto</span>
+            <strong id="distance-text">—</strong>
+          </div>
+          <div class="distance-bar">
+            <div class="distance-bar-fill" id="distance-fill" style="width:100%"></div>
+          </div>
+        </div>
+
+        <button class="btn btn-warning" id="btn-test-alarm" style="display:none">
+          🔔 Testar Alarme
+        </button>
+      </div>
+
+      <!-- Painel do rastreador: controles -->
+      <div class="card" id="card-tracker-controls" style="display:none">
+        <span class="card-title">Controles do Rastreador</span>
+        <div class="info-grid">
+          <div class="info-cell">
+            <label>Precisão GPS</label>
+            <span id="tracker-accuracy">—</span>
+          </div>
+          <div class="info-cell">
+            <label>Envios</label>
+            <span id="tracker-sends">0</span>
+          </div>
+        </div>
+        <button class="btn btn-danger" id="btn-stop-tracker">
+          ⏹ Encerrar Rastreio
+        </button>
+      </div>
+
+      <!-- Passageiros conectados -->
+      <div class="card">
+        <span class="card-title">Passageiros Conectados</span>
+        <div id="users-list" style="font-size:.9rem;color:var(--muted)">
+          Carregando…
+        </div>
+      </div>
+
+    </div><!-- /panel-body -->
+  </div><!-- /side-panel -->
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- OVERLAY: Alarme de desembarque                                          -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div id="alarm-overlay" class="hidden">
+  <div style="font-size:4rem">🔔</div>
+  <h2>Prepare-se!</h2>
+  <p id="alarm-stop-name">Seu ponto está próximo. Prepare-se para desembarcar!</p>
+  <button class="btn btn-ghost" id="btn-dismiss-alarm" style="max-width:240px">
+    ✔ Entendido
+  </button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- TOAST: Notificação do administrador                                     -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div id="admin-toast" class="hidden">
+  <span>📢 </span><span id="admin-toast-msg"></span>
+</div>
+
+<!-- Botão flutuante mobile -->
+<button id="toggle-panel-btn" title="Abrir/Fechar painel">☰</button>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- JAVASCRIPT                                                              -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   ██████╗  CONFIGURAÇÃO — edite estas variáveis antes de publicar
+   ═══════════════════════════════════════════════════════════════════════════ */
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyDRXQG7YinISft96qOKxa_Qm_bTCk71W_A",
+  authDomain:        "bustracker-salvador01.firebaseapp.com",
+  databaseURL:       "https://bustracker-salvador01-default-rtdb.firebaseio.com",
+  projectId:         "bustracker-salvador01",
+  storageBucket:     "bustracker-salvador01.firebasestorage.app",
+  messagingSenderId: "273510732166",
+  appId:             "1:273510732166:web:2f37003eabf1fc99ff1c07"
+};
+
+/* Pontos de parada da rota (personalize conforme a linha real) */
+const BUS_STOPS = [
+  { id: "stop_1",  name: "Terminal Acesso Norte",    lat: -12.9800, lng: -38.4700 },
+  { id: "stop_2",  name: "Shopping Bela Vista",       lat: -12.9901, lng: -38.4812 },
+  { id: "stop_3",  name: "Av. Paralela — Aeroporto",  lat: -12.9110, lng: -38.3310 },
+  { id: "stop_4",  name: "Iguatemi",                  lat: -12.9785, lng: -38.4723 },
+  { id: "stop_5",  name: "Pituba — Praça Roosevelt",  lat: -12.9912, lng: -38.4559 },
+  { id: "stop_6",  name: "Barra — Farol",             lat: -13.0100, lng: -38.5321 },
+  { id: "stop_7",  name: "Campo Grande",              lat: -12.9990, lng: -38.5170 },
+  { id: "stop_8",  name: "Lapa — Terminal",           lat: -12.9693, lng: -38.5148 },
+];
+
+/* Distância (metros) para disparar o alarme */
+const ALARM_DISTANCE_M = 200;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ██████╗  ESTADO GLOBAL
+   ═══════════════════════════════════════════════════════════════════════════ */
+let firebaseApp, firebaseDb;
+let userId, busToken, userRole;   // 'tracker' | 'passenger'
+let map, busMarker, stopMarkers = {}, selectedStop = null;
+let geoWatchId = null, sendCount = 0;
+let alarmFired = false, alarmAudio = null;
+let swRegistration = null;
+let heartbeatTimer = null;
+let panelVisible = true;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ██████╗  INICIALIZAÇÃO
+   ═══════════════════════════════════════════════════════════════════════════ */
+(async function init() {
+  /* Gera ID único para este dispositivo (persiste na sessão) */
+  userId = sessionStorage.getItem("bustrack_uid") || generateId();
+  sessionStorage.setItem("bustrack_uid", userId);
+
+  /* Lê token da URL (?token=XXX) ou do template Flask */
+  const params = new URLSearchParams(window.location.search);
+  busToken = params.get("token") || "{{ token }}";
+
+  if (!busToken || busToken === "{{ token }}") {
+    showError("Nenhum token encontrado na URL. Escaneie o QR Code do ônibus.");
+    return;
+  }
+
+  /* Registra Service Worker */
+  if ("serviceWorker" in navigator) {
+    try {
+      swRegistration = await navigator.serviceWorker.register("/sw.js");
+    } catch (e) {
+      console.warn("SW não registrado:", e);
+    }
+  }
+
+  /* Valida token no backend */
+  let valid = false;
+  try {
+    const res = await fetch("/api/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: busToken, userId })
+    });
+    const data = await res.json();
+    if (data.valid) valid = true;
+    else { showError(data.reason || "Token inválido."); return; }
+  } catch (e) {
+    showError("Erro de conexão com o servidor. Tente novamente.");
+    return;
+  }
+
+  /* Inicializa Firebase */
+  firebaseApp = firebase.initializeApp(FIREBASE_CONFIG);
+  firebaseDb  = firebase.database();
+
+  /* Verifica se já existe rastreador ativo para este token */
+  const trackerSnap = await firebaseDb.ref(`/sessions/${busToken}/tracker`).get();
+  const trackerActive = trackerSnap.exists() && trackerSnap.val()?.active === true;
+
+  if (!trackerActive) {
+    /* Não há rastreador → oferece a opção */
+    showScreen("screen-role");
+    document.getElementById("btn-start-tracker").addEventListener("click", () => startAsTracker());
+    document.getElementById("btn-be-passenger").addEventListener("click", () => startAsPassenger());
+  } else {
+    startAsPassenger();
+  }
+})();
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ██████╗  FUNÇÕES DE TELA
+   ═══════════════════════════════════════════════════════════════════════════ */
+function showScreen(id) {
+  document.querySelectorAll(".screen").forEach(s => {
+    s.classList.toggle("hidden", s.id !== id);
+  });
+}
+
+function showError(msg) {
+  document.getElementById("error-msg").textContent = msg;
+  showScreen("screen-error");
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ██████╗  INICIAR COMO RASTREADOR
+   ═══════════════════════════════════════════════════════════════════════════ */
+async function startAsTracker() {
+  userRole = "tracker";
+
+  if (!navigator.geolocation) {
+    showError("Seu navegador não suporta GPS. Use Chrome ou Safari.");
+    return;
+  }
+
+  /* Solicita permissão de notificação */
+  if ("Notification" in window && Notification.permission === "default") {
+    await Notification.requestPermission();
+  }
+
+  /* Registra rastreador no Firebase */
+  await firebaseDb.ref(`/sessions/${busToken}/tracker`).set({
+    userId, active: true, startedAt: Date.now()
+  });
+  await firebaseDb.ref(`/sessions/${busToken}/users/${userId}`).update({
+    role: "tracker", connectedAt: Date.now(), lastSeen: Date.now()
+  });
+
+  /* Remoção automática ao fechar a aba */
+  window.addEventListener("beforeunload", stopTracker);
+
+  setupMainScreen();
+  initMap();
+
+  /* Painel do rastreador */
+  document.getElementById("card-tracker-controls").style.display = "flex";
+  document.getElementById("card-passenger").style.display = "none";
+  document.getElementById("badge-role").className = "badge badge-green";
+  document.getElementById("badge-role").textContent = "🛰 Rastreador";
+  document.getElementById("btn-stop-tracker").addEventListener("click", () => {
+    stopTracker(); window.location.reload();
+  });
+
+  /* Inicia watch GPS */
+  geoWatchId = navigator.geolocation.watchPosition(onGpsUpdate, onGpsError, {
+    enableHighAccuracy: true,
+    maximumAge: 3000,
+    timeout: 10000
+  });
+
+  /* Heartbeat */
+  startHeartbeat();
+  listenNotifications();
+  listenBannedStatus();
+}
+
+function onGpsUpdate(pos) {
+  const { latitude: lat, longitude: lng, accuracy, speed } = pos.coords;
+  const ts = Date.now();
+  const kmh = speed != null ? (speed * 3.6).toFixed(1) : "—";
+
+  /* Envia ao Firebase */
+  firebaseDb.ref(`/sessions/${busToken}/location`).set({ lat, lng, accuracy, speed: kmh, ts });
+  firebaseDb.ref(`/sessions/${busToken}/users/${userId}/lastSeen`).set(ts);
+
+  sendCount++;
+  document.getElementById("tracker-sends").textContent = sendCount;
+  document.getElementById("tracker-accuracy").textContent = accuracy ? `${accuracy.toFixed(0)}m` : "—";
+
+  /* Atualiza mapa */
+  updateBusMarker(lat, lng);
+
+  /* Atualiza infos */
+  document.getElementById("info-lat").textContent   = lat.toFixed(5);
+  document.getElementById("info-lng").textContent   = lng.toFixed(5);
+  document.getElementById("info-speed").textContent = kmh !== "—" ? `${kmh} km/h` : "—";
+  document.getElementById("info-time").textContent  = new Date().toLocaleTimeString("pt-BR");
+  document.getElementById("location-info").style.display = "grid";
+  setStatus("green", "Rastreando — GPS ativo");
+}
+
+function onGpsError(err) {
+  console.warn("GPS error:", err);
+  setStatus("red", `Erro GPS: ${err.message}`);
+}
+
+async function stopTracker() {
+  if (geoWatchId !== null) navigator.geolocation.clearWatch(geoWatchId);
+  try {
+    await firebaseDb.ref(`/sessions/${busToken}/tracker`).update({ active: false });
+    await firebaseDb.ref(`/sessions/${busToken}/users/${userId}`).remove();
+  } catch(e) {}
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ██████╗  INICIAR COMO PASSAGEIRO
+   ═══════════════════════════════════════════════════════════════════════════ */
+async function startAsPassenger() {
+  userRole = "passenger";
+
+  /* Solicita notificação */
+  if ("Notification" in window && Notification.permission === "default") {
+    await Notification.requestPermission();
+  }
+
+  await firebaseDb.ref(`/sessions/${busToken}/users/${userId}`).update({
+    role: "passenger", connectedAt: Date.now(), lastSeen: Date.now()
+  });
+
+  setupMainScreen();
+  initMap();
+
+  /* Mostra painel do passageiro */
+  document.getElementById("card-passenger").style.display = "flex";
+  document.getElementById("card-tracker-controls").style.display = "none";
+  document.getElementById("badge-role").className = "badge badge-blue";
+  document.getElementById("badge-role").textContent = "🪑 Passageiro";
+
+  /* Popula select de pontos */
+  const sel = document.getElementById("stop-select");
+  BUS_STOPS.forEach(s => {
+    const opt = document.createElement("option");
+    opt.value = s.id; opt.textContent = s.name;
+    sel.appendChild(opt);
+  });
+
+  /* Adiciona marcadores de parada no mapa */
+  BUS_STOPS.forEach(s => addStopMarker(s));
+
+  /* Ao selecionar ponto */
+  sel.addEventListener("change", () => {
+    const id = sel.value;
+    selectedStop = BUS_STOPS.find(s => s.id === id) || null;
+    alarmFired = false;
+    document.getElementById("distance-wrap").style.display = selectedStop ? "flex" : "none";
+    document.getElementById("btn-test-alarm").style.display = selectedStop ? "flex" : "none";
+    if (selectedStop) {
+      map.setView([selectedStop.lat, selectedStop.lng], 15);
+      // salva no Firebase
+      firebaseDb.ref(`/sessions/${busToken}/users/${userId}/stopId`).set(id);
+    }
+  });
+
+  /* Botão de teste */
+  document.getElementById("btn-test-alarm").addEventListener("click", triggerAlarm);
+
+  /* Escuta localização do ônibus em tempo real */
+  firebaseDb.ref(`/sessions/${busToken}/location`).on("value", snap => {
+    if (!snap.exists()) { setStatus("grey", "Aguardando rastreador…"); return; }
+    const { lat, lng, speed, ts } = snap.val();
+    updateBusMarker(lat, lng);
+    document.getElementById("info-lat").textContent   = lat.toFixed(5);
+    document.getElementById("info-lng").textContent   = lng.toFixed(5);
+    document.getElementById("info-speed").textContent = speed !== "—" ? `${speed} km/h` : "—";
+    document.getElementById("info-time").textContent  = ts ? new Date(ts).toLocaleTimeString("pt-BR") : "—";
+    document.getElementById("location-info").style.display = "grid";
+
+    const age = Date.now() - (ts || 0);
+    if (age > 15000) setStatus("grey", "Rastreador inativo");
+    else setStatus("green", "Rastreamento ativo");
+
+    /* Geofencing */
+    if (selectedStop) checkGeofence(lat, lng);
+  });
+
+  /* Escuta status do rastreador */
+  firebaseDb.ref(`/sessions/${busToken}/tracker`).on("value", snap => {
+    if (!snap.exists() || !snap.val()?.active) {
+      setStatus("grey", "Aguardando rastreador…");
+    }
+  });
+
+  startHeartbeat();
+  listenNotifications();
+  listenBannedStatus();
+  listenUsers();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ██████╗  GEOFENCING
+   ═══════════════════════════════════════════════════════════════════════════ */
+function checkGeofence(busLat, busLng) {
+  if (!selectedStop || alarmFired) return;
+  const dist = haversine(busLat, busLng, selectedStop.lat, selectedStop.lng);
+  updateDistanceBar(dist);
+
+  if (dist <= ALARM_DISTANCE_M) {
+    alarmFired = true;
+    triggerAlarm();
+  }
+}
+
+function updateDistanceBar(distM) {
+  const MAX = 2000; // metros
+  const pct = Math.max(0, Math.min(100, (distM / MAX) * 100));
+  document.getElementById("distance-fill").style.width = pct + "%";
+  document.getElementById("distance-text").textContent =
+    distM > 999 ? `${(distM/1000).toFixed(1)} km` : `${Math.round(distM)} m`;
+
+  /* Muda cor conforme proximidade */
+  const fill = document.getElementById("distance-fill");
+  if (distM <= 200)       fill.style.background = "var(--danger)";
+  else if (distM <= 500)  fill.style.background = "var(--warning)";
+  else                    fill.style.background = "linear-gradient(90deg,var(--success),var(--warning))";
+}
+
+function triggerAlarm() {
+  /* Vibração */
+  if (navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 600]);
+
+  /* Som — Web Audio API */
+  playAlarmSound();
+
+  /* Overlay visual */
+  const overlay = document.getElementById("alarm-overlay");
+  if (selectedStop) {
+    document.getElementById("alarm-stop-name").textContent =
+      `Ponto: "${selectedStop.name}" — Prepare-se para desembarcar!`;
+  }
+  overlay.classList.remove("hidden");
+
+  /* Notificação push via Service Worker */
+  if (swRegistration && swRegistration.active) {
+    swRegistration.active.postMessage({
+      type: "ALARM",
+      payload: { message: `Ponto "${selectedStop?.name}" a menos de 200 metros!` }
+    });
+  }
+
+  document.getElementById("btn-dismiss-alarm").addEventListener("click", () => {
+    overlay.classList.add("hidden");
+    if (alarmAudio) { alarmAudio.close(); alarmAudio = null; }
+  }, { once: true });
+}
+
+function playAlarmSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    alarmAudio = ctx;
+    const pattern = [880, 660, 880, 660, 1100];
+    let t = ctx.currentTime;
+    pattern.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = "square";
+      gain.gain.setValueAtTime(.3, t);
+      gain.gain.exponentialRampToValueAtTime(.001, t + .25);
+      osc.start(t); osc.stop(t + .25);
+      t += .3;
+    });
+  } catch(e) {
+    console.warn("Audio API error:", e);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ██████╗  MAPA (Leaflet)
+   ═══════════════════════════════════════════════════════════════════════════ */
+function initMap() {
+  /* Centro padrão: Salvador, BA */
+  map = L.map("map", { zoomControl: true }).setView([-12.9714, -38.5014], 13);
+
+  /* Tile escuro */
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+    subdomains: "abcd", maxZoom: 20
+  }).addTo(map);
+}
+
+const BUS_ICON = L.divIcon({
+  className: "",
+  html: `<div style="
+    font-size:28px;
+    filter: drop-shadow(0 2px 6px rgba(0,0,0,.7));
+    animation: bounce .8s ease-in-out infinite alternate;
+  ">🚌</div>
+  <style>@keyframes bounce{from{transform:translateY(0)}to{transform:translateY(-4px)}}</style>`,
+  iconSize: [36, 36], iconAnchor: [18, 18]
+});
+
+const STOP_ICON = L.divIcon({
+  className: "",
+  html: `<div style="
+    width:14px;height:14px;
+    background:#f59e0b;
+    border:2px solid #fff;
+    border-radius:50%;
+    box-shadow:0 0 8px rgba(245,158,11,.7);
+  "></div>`,
+  iconSize: [14, 14], iconAnchor: [7, 7]
+});
+
+function updateBusMarker(lat, lng) {
+  if (!busMarker) {
+    busMarker = L.marker([lat, lng], { icon: BUS_ICON, zIndexOffset: 1000 }).addTo(map);
+    if (userRole === "passenger") map.setView([lat, lng], 15);
+  } else {
+    busMarker.setLatLng([lat, lng]);
+  }
+}
+
+function addStopMarker(stop) {
+  const m = L.marker([stop.lat, stop.lng], { icon: STOP_ICON })
+    .addTo(map)
+    .bindPopup(`<b>${stop.name}</b><br><small>${stop.id}</small>`);
+  stopMarkers[stop.id] = m;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ██████╗  LISTENERS TEMPO REAL
+   ═══════════════════════════════════════════════════════════════════════════ */
+function listenNotifications() {
+  /* Ouve apenas notificações criadas após o login */
+  const since = Date.now();
+  firebaseDb.ref(`/sessions/${busToken}/notifications`).on("child_added", snap => {
+    const n = snap.val();
+    if (!n || n.timestamp < since) return;
+    showAdminToast(n.message);
+    /* Também via SW */
+    if (swRegistration?.active) {
+      swRegistration.active.postMessage({ type: "ADMIN_NOTIFY", payload: { message: n.message } });
+    }
+  });
+}
+
+function listenBannedStatus() {
+  firebaseDb.ref(`/banned/${userId}`).on("value", snap => {
+    if (snap.val() === true) {
+      showError("Sua conta foi banida pelo administrador.");
+    }
+  });
+}
+
+function listenUsers() {
+  firebaseDb.ref(`/sessions/${busToken}/users`).on("value", snap => {
+    const users = snap.val() || {};
+    const list = document.getElementById("users-list");
+    const entries = Object.entries(users);
+    if (!entries.length) { list.textContent = "Nenhum usuário conectado."; return; }
+
+    list.innerHTML = entries.map(([uid, u]) => {
+      const age = Date.now() - (u.lastSeen || 0);
+      const online = age < 30000;
+      const roleIcon = u.role === "tracker" ? "🛰" : "🪑";
+      const stopName = u.stopId ? (BUS_STOPS.find(s => s.id === u.stopId)?.name || u.stopId) : "—";
+      return `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+        <div style="width:8px;height:8px;border-radius:50%;background:${online?"var(--success)":"var(--muted)"}"></div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.8rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${roleIcon} ${uid.slice(0,8)}…</div>
+          <div style="font-size:.72rem;color:var(--muted)">${stopName}</div>
+        </div>
+      </div>`;
+    }).join("");
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ██████╗  UI HELPERS
+   ═══════════════════════════════════════════════════════════════════════════ */
+function setupMainScreen() {
+  showScreen("screen-main");
+  document.getElementById("badge-token").textContent = `🔑 ${busToken}`;
+}
+
+function setStatus(color, text) {
+  const dot = document.getElementById("dot-status");
+  dot.className = `dot dot-${color}`;
+  document.getElementById("status-text").textContent = text;
+}
+
+function showAdminToast(msg) {
+  const toast = document.getElementById("admin-toast");
+  document.getElementById("admin-toast-msg").textContent = msg;
+  toast.classList.remove("hidden");
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => toast.classList.add("hidden"), 8000);
+}
+
+function startHeartbeat() {
+  heartbeatTimer = setInterval(async () => {
+    await fetch("/api/heartbeat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: busToken, userId })
+    });
+  }, 15000);
+}
+
+/* Toggle painel no mobile */
+document.getElementById("toggle-panel-btn").addEventListener("click", () => {
+  const panel = document.getElementById("side-panel");
+  panelVisible = !panelVisible;
+  panel.style.display = panelVisible ? "flex" : "none";
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ██████╗  UTILITÁRIOS
+   ═══════════════════════════════════════════════════════════════════════════ */
+function haversine(lat1, lng1, lat2, lng2) {
+  const R = 6371000; // metros
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function toRad(deg) { return deg * Math.PI / 180; }
+
+function generateId() {
+  return "u_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+</script>
+
+</body>
+</html>
